@@ -110,12 +110,16 @@
                             <option value="tempmail">Tempmail</option>
                             <option value="outlook">Outlook</option>
                             <option value="custom_domain">自定义域名</option>
+                            <option value="manual">手动添加</option>
                         </select>
 
                         <input type="text" id="search-input" class="form-input" placeholder="🔍 搜索邮箱..." style="min-width: 200px;">
                     </div>
 
                     <div class="toolbar-right">
+                        <button class="btn btn-primary" id="add-account-btn" title="手动新增账号">
+                            ➕ 新增账号
+                        </button>
                         <button class="btn btn-ghost" id="refresh-btn" title="刷新">
                             🔄 刷新
                         </button>
@@ -198,6 +202,32 @@
                 </div>
             </div>
         </main>
+    </div>
+
+    <!-- 详情模态框 -->
+    <div class="modal" id="add-account-modal">
+        <div class="modal-content" style="max-width: 460px;">
+            <div class="modal-header">
+                <h3>➕ 手动新增账号</h3>
+                <button class="modal-close" id="close-add-account-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="add-account-form">
+                    <div class="form-group">
+                        <label for="add-account-email">邮箱</label>
+                        <input type="email" id="add-account-email" class="form-input" required placeholder="name@example.com" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label for="add-account-password">密码</label>
+                        <input type="text" id="add-account-password" class="form-input" required placeholder="请输入密码" autocomplete="off">
+                    </div>
+                    <div class="form-actions" style="margin-top: var(--spacing-lg);">
+                        <button type="button" class="btn btn-secondary" id="cancel-add-account-btn">取消</button>
+                        <button type="submit" class="btn btn-primary" id="submit-add-account-btn">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
 
     <!-- 详情模态框 -->

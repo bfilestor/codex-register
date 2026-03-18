@@ -273,14 +273,21 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                             config['default_domain'] = config.pop('domain')
                         crud.update_registration_task(db, task_uuid, email_service_id=db_service.id)
                         logger.info(f"使用数据库自定义域名服务: {db_service.name}")
-                    elif settings.custom_domain_base_url and settings.custom_domain_api_key:
-                        config = {
-                            "base_url": settings.custom_domain_base_url,
-                            "api_key": settings.custom_domain_api_key.get_secret_value() if settings.custom_domain_api_key else "",
-                            "proxy_url": actual_proxy_url,
-                        }
                     else:
-                        raise ValueError("没有可用的自定义域名邮箱服务，请先在设置中配置")
+                        custom_api_key = (
+                            settings.custom_domain_api_key.get_secret_value()
+                            if settings.custom_domain_api_key else ""
+                        )
+                        custom_base_url = (settings.custom_domain_base_url or "").strip()
+
+                        if custom_base_url and custom_api_key:
+                            config = {
+                                "base_url": custom_base_url,
+                                "api_key": custom_api_key,
+                                "proxy_url": actual_proxy_url,
+                            }
+                        else:
+                            raise ValueError("没有可用的自定义域名邮箱服务，请先在邮箱服务页面配置 base_url/api_key/domain")
                 elif service_type == EmailServiceType.OUTLOOK:
                     # 检查数据库中是否有可用的 Outlook 账户
                     from ...database.models import EmailService as EmailServiceModel, Account
@@ -1002,7 +1009,13 @@ async def get_available_email_services():
 
         # 如果数据库中没有自定义域名服务，检查 settings
         if not result["custom_domain"]["available"]:
-            if settings.custom_domain_base_url and settings.custom_domain_api_key:
+            custom_api_key = (
+                settings.custom_domain_api_key.get_secret_value()
+                if settings.custom_domain_api_key else ""
+            )
+            custom_base_url = (settings.custom_domain_base_url or "").strip()
+
+            if custom_base_url and custom_api_key:
                 result["custom_domain"]["available"] = True
                 result["custom_domain"]["count"] = 1
                 result["custom_domain"]["services"].append({

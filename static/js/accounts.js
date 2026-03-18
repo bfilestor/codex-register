@@ -35,6 +35,14 @@ const elements = {
     prevPage: document.getElementById('prev-page'),
     nextPage: document.getElementById('next-page'),
     pageInfo: document.getElementById('page-info'),
+    addAccountBtn: document.getElementById('add-account-btn'),
+    addAccountModal: document.getElementById('add-account-modal'),
+    addAccountForm: document.getElementById('add-account-form'),
+    addAccountEmail: document.getElementById('add-account-email'),
+    addAccountPassword: document.getElementById('add-account-password'),
+    closeAddAccountModal: document.getElementById('close-add-account-modal'),
+    cancelAddAccountBtn: document.getElementById('cancel-add-account-btn'),
+    submitAddAccountBtn: document.getElementById('submit-add-account-btn'),
     detailModal: document.getElementById('detail-modal'),
     modalBody: document.getElementById('modal-body'),
     closeModal: document.getElementById('close-modal')
@@ -51,6 +59,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // 事件监听
 function initEventListeners() {
+    // 手动新增账号
+    elements.addAccountBtn?.addEventListener('click', openAddAccountModal);
+    elements.closeAddAccountModal?.addEventListener('click', closeAddAccountModal);
+    elements.cancelAddAccountBtn?.addEventListener('click', closeAddAccountModal);
+    elements.addAccountForm?.addEventListener('submit', handleAddAccountSubmit);
+    elements.addAccountModal?.addEventListener('click', (e) => {
+        if (e.target === elements.addAccountModal) {
+            closeAddAccountModal();
+        }
+    });
+
     // 筛选
     elements.filterStatus.addEventListener('change', () => {
         currentPage = 1;
@@ -169,6 +188,57 @@ function initEventListeners() {
     document.addEventListener('click', () => {
         elements.exportMenu.classList.remove('active');
     });
+}
+
+function openAddAccountModal() {
+    if (!elements.addAccountModal) return;
+    elements.addAccountModal.classList.add('active');
+    setTimeout(() => {
+        elements.addAccountEmail?.focus();
+    }, 0);
+}
+
+function closeAddAccountModal() {
+    if (!elements.addAccountModal) return;
+    elements.addAccountModal.classList.remove('active');
+    elements.addAccountForm?.reset();
+}
+
+async function handleAddAccountSubmit(e) {
+    e.preventDefault();
+
+    const email = (elements.addAccountEmail?.value || '').trim();
+    const password = (elements.addAccountPassword?.value || '').trim();
+
+    if (!email) {
+        toast.warning('请输入邮箱');
+        return;
+    }
+    if (!password) {
+        toast.warning('请输入密码');
+        return;
+    }
+
+    if (elements.submitAddAccountBtn) {
+        elements.submitAddAccountBtn.disabled = true;
+        elements.submitAddAccountBtn.textContent = '保存中...';
+    }
+
+    try {
+        const account = await api.post('/accounts/manual', { email, password });
+        toast.success(`账号已保存: ${account.email}`);
+        closeAddAccountModal();
+        currentPage = 1;
+        await loadStats();
+        await loadAccounts();
+    } catch (error) {
+        toast.error('保存失败: ' + error.message);
+    } finally {
+        if (elements.submitAddAccountBtn) {
+            elements.submitAddAccountBtn.disabled = false;
+            elements.submitAddAccountBtn.textContent = '保存';
+        }
+    }
 }
 
 // 加载统计信息

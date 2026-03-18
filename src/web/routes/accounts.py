@@ -4,6 +4,7 @@
 
 import json
 import logging
+import re
 from typing import List, Optional
 from datetime import datetime
 
@@ -14,7 +15,7 @@ from pydantic import BaseModel
 from ...database import crud
 from ...database.session import get_db
 from ...database.models import Account
-from ...config.constants import AccountStatus
+from ...config.constants import AccountStatus, REGEX_PATTERNS
 from ...config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,12 @@ class AccountUpdateRequest(BaseModel):
     status: Optional[str] = None
     metadata: Optional[dict] = None
     cookies: Optional[str] = None  # 完整 cookie 字符串，用于支付请求
+
+
+class ManualAccountCreateRequest(BaseModel):
+    """手动新增账号请求"""
+    email: str
+    password: str
 
 
 class BatchDeleteRequest(BaseModel):
@@ -179,6 +186,37 @@ async def get_account(account_id: int):
         account = crud.get_account_by_id(db, account_id)
         if not account:
             raise HTTPException(status_code=404, detail="账号不存在")
+        return account_to_response(account)
+
+
+@router.post("/manual", response_model=AccountResponse)
+async def create_manual_account(request: ManualAccountCreateRequest):
+    """手动新增账号（邮箱 + 密码）"""
+    email = (request.email or "").strip().lower()
+    password = (request.password or "").strip()
+
+    if not email:
+        raise HTTPException(status_code=400, detail="邮箱不能为空")
+    if len(email) > 255 or not re.match(REGEX_PATTERNS["EMAIL"], email):
+        raise HTTPException(status_code=400, detail="邮箱格式无效")
+    if not password:
+        raise HTTPException(status_code=400, detail="密码不能为空")
+    if len(password) > 255:
+        raise HTTPException(status_code=400, detail="密码长度不能超过 255")
+
+    with get_db() as db:
+        existing = crud.get_account_by_email(db, email)
+        if existing:
+            raise HTTPException(status_code=409, detail=f"邮箱已存在: {email}")
+
+        account = crud.create_account(
+            db,
+            email=email,
+            password=password,
+            email_service="manual",
+            status=AccountStatus.ACTIVE.value,
+            source="manual",
+        )
         return account_to_response(account)
 
 
