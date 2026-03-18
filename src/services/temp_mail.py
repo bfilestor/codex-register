@@ -266,15 +266,28 @@ class TempMailService(BaseEmailService):
         start_time = time.time()
         seen_mail_ids: set = set()
         blocked_codes = set(re.findall(r"(?<!\d)(\d{6})(?!\d)", email or ""))
+        # 优先使用用户级 JWT，回退到 admin API
+        cached = self._email_cache.get(email, {})
+        jwt = cached.get("jwt")
 
         while time.time() - start_time < timeout:
             try:
-                # 使用 admin API 查询邮件，通过 address 参数过滤
-                response = self._make_request(
-                    "GET",
-                    "/admin/mails",
-                    params={"limit": 20, "offset": 0, "address": email},
-                )
+                # admin/mails 返回格式: {"results": [...], "total": N}
+                if jwt:
+                    response = self._make_request(
+                        "GET",
+                        "/api/mails",
+                        params={"limit": 20, "offset": 0},
+                        headers={"Authorization": f"Bearer {jwt}", "Content-Type": "application/json", "Accept": "application/json"},
+                    )
+                else:
+                    response = self._make_request(
+                        "GET",
+                        "/admin/mails",
+                        params={"limit": 20, "offset": 0, "address": email},
+                    )
+
+                # /user_api/mails 和 /admin/mails 返回格式相同: {"results": [...], "total": N}
 
                 # admin/mails 返回格式: {"results": [...], "total": N}
                 mails = response.get("results", [])

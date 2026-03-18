@@ -108,6 +108,33 @@ function initEventListeners() {
     // Outlook 批量删除
     elements.batchDeleteOutlookBtn.addEventListener('click', handleBatchDeleteOutlook);
 
+    // Outlook 行操作（使用事件委托，避免内联 onclick 造成字段错位/点击异常）
+    delegate(elements.outlookTable, 'click', 'button[data-action]', async (e, btn) => {
+        const id = parseInt(btn.dataset.id);
+        if (!id) return;
+
+        switch (btn.dataset.action) {
+            case 'edit-outlook':
+                await editOutlookService(id);
+                break;
+            case 'toggle-service': {
+                const currentEnabled = btn.dataset.enabled === '1';
+                await toggleService(id, !currentEnabled);
+                break;
+            }
+            case 'test-service':
+                await testService(id);
+                break;
+            case 'delete-service': {
+                const name = getServiceNameById(id) || `ID ${id}`;
+                await deleteService(id, name);
+                break;
+            }
+            default:
+                break;
+        }
+    });
+
     // 自定义域名全选
     elements.selectAllCustom.addEventListener('change', (e) => {
         const checkboxes = elements.customTable.querySelectorAll('input[type="checkbox"][data-id]');
@@ -117,6 +144,33 @@ function initEventListeners() {
             if (e.target.checked) selectedCustom.add(id);
             else selectedCustom.delete(id);
         });
+    });
+
+    // 自定义域名行操作（使用事件委托，避免内联 onclick 造成字段错位/点击异常）
+    delegate(elements.customTable, 'click', 'button[data-action]', async (e, btn) => {
+        const id = parseInt(btn.dataset.id);
+        if (!id) return;
+
+        switch (btn.dataset.action) {
+            case 'edit-custom':
+                await editCustomService(id, btn.dataset.subType);
+                break;
+            case 'toggle-service': {
+                const currentEnabled = btn.dataset.enabled === '1';
+                await toggleService(id, !currentEnabled);
+                break;
+            }
+            case 'test-service':
+                await testService(id);
+                break;
+            case 'delete-service': {
+                const name = getServiceNameById(id) || `ID ${id}`;
+                await deleteService(id, name);
+                break;
+            }
+            default:
+                break;
+        }
     });
 
     // 添加自定义域名
@@ -217,13 +271,13 @@ async function loadOutlookServices() {
                     </span>
                 </td>
                 <td>${service.priority}</td>
-                <td>${format.date(service.last_used)}</td>
+                <td style="white-space: nowrap;">${format.date(service.last_used)}</td>
                 <td>
                     <div class="action-buttons">
-                        <button class="btn btn-ghost btn-sm" onclick="editOutlookService(${service.id})" title="编辑">✏️</button>
-                        <button class="btn btn-ghost btn-sm" onclick="toggleService(${service.id}, ${!service.enabled})" title="${service.enabled ? '禁用' : '启用'}">${service.enabled ? '🔇' : '🔊'}</button>
-                        <button class="btn btn-ghost btn-sm" onclick="testService(${service.id})" title="测试">🔌</button>
-                        <button class="btn btn-ghost btn-sm" onclick="deleteService(${service.id}, '${escapeHtml(service.name)}')" title="删除">🗑️</button>
+                        <button class="btn btn-ghost btn-sm" data-action="edit-outlook" data-id="${service.id}" title="编辑">✏️</button>
+                        <button class="btn btn-ghost btn-sm" data-action="toggle-service" data-id="${service.id}" data-enabled="${service.enabled ? '1' : '0'}" title="${service.enabled ? '禁用' : '启用'}">${service.enabled ? '🔇' : '🔊'}</button>
+                        <button class="btn btn-ghost btn-sm" data-action="test-service" data-id="${service.id}" title="测试">🔌</button>
+                        <button class="btn btn-ghost btn-sm" data-action="delete-service" data-id="${service.id}" title="删除">🗑️</button>
                     </div>
                 </td>
             </tr>
@@ -283,13 +337,13 @@ async function loadCustomServices() {
                 <td style="font-size: 0.75rem;">${escapeHtml(addr)}</td>
                 <td><span class="status-badge ${service.enabled ? 'active' : 'disabled'}">${service.enabled ? '启用' : '禁用'}</span></td>
                 <td>${service.priority}</td>
-                <td>${format.date(service.last_used)}</td>
+                <td style="white-space: nowrap;">${format.date(service.last_used)}</td>
                 <td>
                     <div class="action-buttons">
-                        <button class="btn btn-ghost btn-sm" onclick="editCustomService(${service.id}, '${service._subType}')" title="编辑">✏️</button>
-                        <button class="btn btn-ghost btn-sm" onclick="toggleService(${service.id}, ${!service.enabled})" title="${service.enabled ? '禁用' : '启用'}">${service.enabled ? '🔇' : '🔊'}</button>
-                        <button class="btn btn-ghost btn-sm" onclick="testService(${service.id})" title="测试">🔌</button>
-                        <button class="btn btn-ghost btn-sm" onclick="deleteService(${service.id}, '${escapeHtml(service.name)}')" title="删除">🗑️</button>
+                        <button class="btn btn-ghost btn-sm" data-action="edit-custom" data-id="${service.id}" data-sub-type="${service._subType}" title="编辑">✏️</button>
+                        <button class="btn btn-ghost btn-sm" data-action="toggle-service" data-id="${service.id}" data-enabled="${service.enabled ? '1' : '0'}" title="${service.enabled ? '禁用' : '启用'}">${service.enabled ? '🔇' : '🔊'}</button>
+                        <button class="btn btn-ghost btn-sm" data-action="test-service" data-id="${service.id}" title="测试">🔌</button>
+                        <button class="btn btn-ghost btn-sm" data-action="delete-service" data-id="${service.id}" title="删除">🗑️</button>
                     </div>
                 </td>
             </tr>`;
@@ -508,6 +562,16 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function getServiceNameById(id) {
+    const custom = customServices.find(s => s.id === id);
+    if (custom) return custom.name || '';
+
+    const outlook = outlookServices.find(s => s.id === id);
+    if (outlook) return outlook.name || outlook.config?.email || '';
+
+    return '';
 }
 
 // ============== 编辑功能 ==============
