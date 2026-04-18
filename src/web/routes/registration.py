@@ -226,6 +226,7 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
             # 创建邮箱服务
             service_type = EmailServiceType(email_service_type)
             settings = get_settings()
+            resolved_email_service_id = email_service_id
 
             # 优先使用数据库中配置的邮箱服务
             if email_service_id:
@@ -241,9 +242,10 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                     if 'api_url' in config and 'base_url' not in config:
                         config['base_url'] = config.pop('api_url')
                     if 'domain' in config and 'default_domain' not in config:
-                        config['default_domain'] = config.pop('domain')
+                        config['default_domain'] = config.get('domain')
                     # 更新任务关联的邮箱服务
                     crud.update_registration_task(db, task_uuid, email_service_id=db_service.id)
+                    resolved_email_service_id = db_service.id
                     logger.info(f"使用数据库邮箱服务: {db_service.name} (ID: {db_service.id})")
                 else:
                     raise ValueError(f"邮箱服务不存在或已禁用: {email_service_id}")
@@ -270,8 +272,9 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                         if 'api_url' in config and 'base_url' not in config:
                             config['base_url'] = config.pop('api_url')
                         if 'domain' in config and 'default_domain' not in config:
-                            config['default_domain'] = config.pop('domain')
+                            config['default_domain'] = config.get('domain')
                         crud.update_registration_task(db, task_uuid, email_service_id=db_service.id)
+                        resolved_email_service_id = db_service.id
                         logger.info(f"使用数据库自定义域名服务: {db_service.name}")
                     else:
                         custom_api_key = (
@@ -288,6 +291,25 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                             }
                         else:
                             raise ValueError("没有可用的自定义域名邮箱服务，请先在邮箱服务页面配置 base_url/api_key/domain")
+                elif service_type == EmailServiceType.TEMP_MAIL:
+                    # 优先使用数据库中已启用的 temp_mail 服务
+                    from ...database.models import EmailService as EmailServiceModel
+                    db_service = db.query(EmailServiceModel).filter(
+                        EmailServiceModel.service_type == "temp_mail",
+                        EmailServiceModel.enabled == True
+                    ).order_by(EmailServiceModel.priority.asc()).first()
+
+                    if db_service and db_service.config:
+                        config = db_service.config.copy()
+                        if 'api_url' in config and 'base_url' not in config:
+                            config['base_url'] = config.pop('api_url')
+                        if 'default_domain' in config and 'domain' not in config:
+                            config['domain'] = config.get('default_domain')
+                        crud.update_registration_task(db, task_uuid, email_service_id=db_service.id)
+                        resolved_email_service_id = db_service.id
+                        logger.info(f"使用数据库 Temp-Mail 自部署服务: {db_service.name}")
+                    else:
+                        raise ValueError("没有可用的 Temp-Mail 自部署服务，请先在邮箱服务页面配置 base_url/admin_password/domain")
                 elif service_type == EmailServiceType.OUTLOOK:
                     # 检查数据库中是否有可用的 Outlook 账户
                     from ...database.models import EmailService as EmailServiceModel, Account
@@ -318,6 +340,7 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                     if selected_service and selected_service.config:
                         config = selected_service.config.copy()
                         crud.update_registration_task(db, task_uuid, email_service_id=selected_service.id)
+                        resolved_email_service_id = selected_service.id
                         logger.info(f"使用数据库 Outlook 账户: {selected_service.name}")
                     else:
                         raise ValueError("所有 Outlook 账户都已注册过 OpenAI 账号，请添加新的 Outlook 账户")
@@ -328,6 +351,15 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
 
             # 创建注册引擎 - 使用 TaskManager 的日志回调
             log_callback = task_manager.create_log_callback(task_uuid, prefix=log_prefix, batch_id=batch_id)
+            if service_type == EmailServiceType.TEMP_MAIL:
+                # 打印脱敏后的实际生效配置，便于排查 temp_mail 注册流程是否走对接口
+                effective_base_url = str(config.get("base_url", "")).strip()
+                effective_domain = str(config.get("domain") or config.get("default_domain") or "").strip()
+                source_service_id = resolved_email_service_id if resolved_email_service_id else "auto"
+                log_callback(
+                    f"[邮箱] Temp-Mail 生效配置: base_url={effective_base_url}, "
+                    f"domain={effective_domain}, service_id={source_service_id}"
+                )
 
             engine = RegistrationEngine(
                 email_service=email_service,

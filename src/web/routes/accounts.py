@@ -5,10 +5,10 @@
 import json
 import logging
 import re
-from typing import List, Optional
-from datetime import datetime
+from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, File, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -347,6 +347,224 @@ class BatchExportRequest(BaseModel):
     status_filter: Optional[str] = None
     email_service_filter: Optional[str] = None
     search_filter: Optional[str] = None
+
+
+def _to_optional_string(
+    value: Any,
+    *,
+    field_name: str,
+    max_length: Optional[int] = None,
+    strip_value: bool = True,
+) -> Optional[str]:
+    """将任意值转换为可选字符串，并校验长度"""
+    if value is None:
+        return None
+
+    if isinstance(value, str):
+        text = value.strip() if strip_value else value
+    else:
+        text = str(value).strip() if strip_value else str(value)
+
+    if text == "":
+        return None
+
+    if max_length is not None and len(text) > max_length:
+        raise ValueError(f"{field_name} 长度不能超过 {max_length}")
+
+    return text
+
+
+def _parse_optional_datetime(value: Any, *, field_name: str) -> Optional[datetime]:
+    """解析可选时间字段，支持 ISO8601 字符串或时间戳"""
+    if value in (None, ""):
+        return None
+
+    parsed: Optional[datetime] = None
+
+    if isinstance(value, (int, float)):
+        parsed = datetime.fromtimestamp(float(value), tz=timezone.utc)
+    elif isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.endswith("Z"):
+            raw = f"{raw[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError as exc:
+            raise ValueError(f"{field_name} 不是有效时间格式: {value}") from exc
+    else:
+        raise ValueError(f"{field_name} 类型无效: {type(value).__name__}")
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return parsed
+
+
+def _build_import_fields(
+    record: Dict[str, Any],
+    *,
+    status_values: set,
+    warnings: List[str],
+    row_no: int,
+) -> Dict[str, Any]:
+    """将导入记录转换为 Account 可写字段"""
+    email = _to_optional_string(record.get("email"), field_name="email", max_length=255)
+    if not email:
+        raise ValueError("email 不能为空")
+    email = email.lower()
+    if not re.match(REGEX_PATTERNS["EMAIL"], email):
+        raise ValueError(f"email 格式无效: {email}")
+
+    email_service = _to_optional_string(
+        record.get("email_service"),
+        field_name="email_service",
+        max_length=50
+    ) or "manual"
+
+    status = (_to_optional_string(
+        record.get("status"),
+        field_name="status",
+        max_length=20
+    ) or AccountStatus.ACTIVE.value).lower()
+    if status not in status_values:
+        warnings.append(f"第 {row_no} 条记录状态值无效（{status}），已自动改为 active")
+        status = AccountStatus.ACTIVE.value
+
+    source = _to_optional_string(record.get("source"), field_name="source", max_length=20) or "import"
+
+    registered_at = _parse_optional_datetime(record.get("registered_at"), field_name="registered_at")
+
+    return {
+        "email": email,
+        "password": _to_optional_string(record.get("password"), field_name="password", max_length=255),
+        "client_id": _to_optional_string(record.get("client_id"), field_name="client_id", max_length=255),
+        "session_token": _to_optional_string(
+            record.get("session_token"),
+            field_name="session_token",
+            strip_value=False
+        ),
+        "email_service": email_service,
+        "email_service_id": _to_optional_string(record.get("email_service_id"), field_name="email_service_id", max_length=255),
+        "account_id": _to_optional_string(record.get("account_id"), field_name="account_id", max_length=255),
+        "workspace_id": _to_optional_string(record.get("workspace_id"), field_name="workspace_id", max_length=255),
+        "access_token": _to_optional_string(record.get("access_token"), field_name="access_token", strip_value=False),
+        "refresh_token": _to_optional_string(record.get("refresh_token"), field_name="refresh_token", strip_value=False),
+        "id_token": _to_optional_string(record.get("id_token"), field_name="id_token", strip_value=False),
+        "proxy_used": _to_optional_string(record.get("proxy_used"), field_name="proxy_used", max_length=255),
+        "registered_at": registered_at or datetime.utcnow(),
+        "last_refresh": _parse_optional_datetime(record.get("last_refresh"), field_name="last_refresh"),
+        "expires_at": _parse_optional_datetime(record.get("expires_at"), field_name="expires_at"),
+        "status": status,
+        "source": source,
+        "cookies": _to_optional_string(record.get("cookies"), field_name="cookies", strip_value=False),
+    }
+
+
+@router.post("/import/json")
+async def import_accounts_json(file: UploadFile = File(...)):
+    """从导出的 JSON 文件导入账号（仅创建，不更新已存在邮箱）"""
+    filename = file.filename or ""
+    if not filename:
+        raise HTTPException(status_code=400, detail="请选择要导入的 JSON 文件")
+    if not filename.lower().endswith(".json"):
+        raise HTTPException(status_code=400, detail="仅支持导入 .json 文件")
+
+    raw_content = await file.read()
+    if not raw_content:
+        raise HTTPException(status_code=400, detail="导入文件为空")
+
+    try:
+        payload = json.loads(raw_content.decode("utf-8-sig"))
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="文件编码无效，请使用 UTF-8 JSON") from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"JSON 解析失败: {exc.msg}") from exc
+
+    if isinstance(payload, list):
+        records = payload
+    elif isinstance(payload, dict) and isinstance(payload.get("accounts"), list):
+        records = payload.get("accounts", [])
+    else:
+        raise HTTPException(status_code=400, detail="JSON 结构无效，应为数组或包含 accounts 数组的对象")
+
+    total_count = len(records)
+    if total_count == 0:
+        return {
+            "success": True,
+            "total": 0,
+            "created_count": 0,
+            "updated_count": 0,
+            "skipped_count": 0,
+            "skipped_existing_count": 0,
+            "skipped_existing": None,
+            "failed_count": 0,
+            "warnings": None,
+            "errors": None
+        }
+
+    status_values = {e.value for e in AccountStatus}
+    created_count = 0
+    skipped_count = 0
+    skipped_existing_count = 0
+    skipped_existing: List[str] = []
+    warnings: List[str] = []
+    errors: List[str] = []
+    seen_emails = set()
+
+    with get_db() as db:
+        for idx, item in enumerate(records, start=1):
+            try:
+                if not isinstance(item, dict):
+                    raise ValueError("记录必须为 JSON 对象")
+
+                fields = _build_import_fields(
+                    item,
+                    status_values=status_values,
+                    warnings=warnings,
+                    row_no=idx
+                )
+                email = fields["email"]
+
+                if email in seen_emails:
+                    raise ValueError(f"文件中存在重复邮箱: {email}")
+                seen_emails.add(email)
+
+                existing = crud.get_account_by_email(db, email)
+                if existing:
+                    skipped_count += 1
+                    skipped_existing_count += 1
+                    skipped_existing.append(f"第 {idx} 条: {email}")
+                    continue
+
+                account = Account(**fields)
+                db.add(account)
+                created_count += 1
+
+                db.commit()
+            except ValueError as exc:
+                db.rollback()
+                skipped_count += 1
+                errors.append(f"第 {idx} 条: {exc}")
+            except Exception as exc:
+                db.rollback()
+                skipped_count += 1
+                logger.exception("导入账号异常（第 %s 条）", idx)
+                errors.append(f"第 {idx} 条: {str(exc)}")
+
+    return {
+        "success": True,
+        "total": total_count,
+        "created_count": created_count,
+        "updated_count": 0,
+        "skipped_count": skipped_count,
+        "skipped_existing_count": skipped_existing_count,
+        "skipped_existing": skipped_existing or None,
+        "failed_count": len(errors),
+        "warnings": warnings or None,
+        "errors": errors or None
+    }
 
 
 @router.post("/export/json")

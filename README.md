@@ -206,6 +206,7 @@ codex-register-v2/
 | GET | `/api/accounts/{id}` | 账号详情 |
 | DELETE | `/api/accounts/{id}` | 删除账号 |
 | POST | `/api/accounts/batch-delete` | 批量删除 |
+| POST | `/api/accounts/import/json` | 导入导出的 JSON 账号文件（仅新增，已存在邮箱自动跳过） |
 | POST | `/api/accounts/export/json` | 导出 JSON |
 | POST | `/api/accounts/export/csv` | 导出 CSV |
 | POST | `/api/accounts/export/cpa` | 导出 CPA 格式（单文件或 ZIP） |

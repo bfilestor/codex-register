@@ -35,6 +35,8 @@ const elements = {
     prevPage: document.getElementById('prev-page'),
     nextPage: document.getElementById('next-page'),
     pageInfo: document.getElementById('page-info'),
+    importBtn: document.getElementById('import-btn'),
+    importFileInput: document.getElementById('import-file-input'),
     addAccountBtn: document.getElementById('add-account-btn'),
     addAccountModal: document.getElementById('add-account-modal'),
     addAccountForm: document.getElementById('add-account-form'),
@@ -43,6 +45,16 @@ const elements = {
     closeAddAccountModal: document.getElementById('close-add-account-modal'),
     cancelAddAccountBtn: document.getElementById('cancel-add-account-btn'),
     submitAddAccountBtn: document.getElementById('submit-add-account-btn'),
+    importResultModal: document.getElementById('import-result-modal'),
+    closeImportResultModal: document.getElementById('close-import-result-modal'),
+    importResultOkBtn: document.getElementById('import-result-ok-btn'),
+    importResultSummary: document.getElementById('import-result-summary'),
+    importResultExistingSection: document.getElementById('import-result-existing-section'),
+    importResultExisting: document.getElementById('import-result-existing'),
+    importResultErrorsSection: document.getElementById('import-result-errors-section'),
+    importResultErrors: document.getElementById('import-result-errors'),
+    importResultWarningsSection: document.getElementById('import-result-warnings-section'),
+    importResultWarnings: document.getElementById('import-result-warnings'),
     detailModal: document.getElementById('detail-modal'),
     modalBody: document.getElementById('modal-body'),
     closeModal: document.getElementById('close-modal')
@@ -59,6 +71,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // 事件监听
 function initEventListeners() {
+    // 导入账号
+    elements.importBtn?.addEventListener('click', () => {
+        if (!elements.importFileInput) {
+            toast.error('导入控件未加载，请刷新页面重试');
+            return;
+        }
+        // 先清空值，确保重复选择同一文件时也会触发 change
+        elements.importFileInput.value = '';
+        elements.importFileInput.click();
+    });
+    elements.importFileInput?.addEventListener('change', handleImportFileChange);
+    elements.importFileInput?.addEventListener('cancel', handleImportFileCancel);
+    elements.closeImportResultModal?.addEventListener('click', closeImportResultModal);
+    elements.importResultOkBtn?.addEventListener('click', closeImportResultModal);
+    elements.importResultModal?.addEventListener('click', (e) => {
+        if (e.target === elements.importResultModal) {
+            closeImportResultModal();
+        }
+    });
+
     // 手动新增账号
     elements.addAccountBtn?.addEventListener('click', openAddAccountModal);
     elements.closeAddAccountModal?.addEventListener('click', closeAddAccountModal);
@@ -239,6 +271,156 @@ async function handleAddAccountSubmit(e) {
             elements.submitAddAccountBtn.textContent = '保存';
         }
     }
+}
+
+async function handleImportFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) {
+        toast.info('未选择文件');
+        return;
+    }
+
+    try {
+        await importAccountsFromJson(file);
+    } finally {
+        // 清空文件输入，允许重复选择同一个文件
+        e.target.value = '';
+    }
+}
+
+function handleImportFileCancel() {
+    toast.info('已取消导入');
+}
+
+async function importAccountsFromJson(file) {
+    const filename = (file.name || '').trim();
+    if (!filename.toLowerCase().endsWith('.json')) {
+        toast.warning('请选择 .json 文件');
+        return;
+    }
+
+    const confirmed = await confirm(
+        `确定导入文件「${filename}」吗？系统将仅新增账号，已存在邮箱会自动跳过。`,
+        '导入账号'
+    );
+    if (!confirmed) return;
+
+    const originalText = elements.importBtn?.textContent;
+    if (elements.importBtn) {
+        elements.importBtn.disabled = true;
+        elements.importBtn.textContent = '导入中...';
+    }
+
+    try {
+        toast.info('正在导入账号，请稍候...');
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('/api/accounts/import/json', {
+            method: 'POST',
+            body: formData
+        });
+
+        let result = {};
+        try {
+            result = await response.json();
+        } catch (parseError) {
+            result = {};
+        }
+
+        if (!response.ok) {
+            throw new Error(result.detail || `导入失败: HTTP ${response.status}`);
+        }
+
+        const created = result.created_count || 0;
+        const skipped = result.skipped_count || 0;
+        const failed = result.failed_count || (result.errors?.length || 0);
+        const skippedExisting = result.skipped_existing_count || 0;
+        toast.success(`导入完成：新增 ${created}，跳过 ${skipped}，失败 ${failed}`);
+
+        if (failed > 0) {
+            toast.warning(`有 ${failed} 条导入失败，请查看导入结果详情`);
+        }
+
+        if (skippedExisting > 0) {
+            toast.info(`有 ${skippedExisting} 条已存在账号被自动跳过`);
+        }
+
+        showImportResultModal(result, filename);
+
+        resetSelectAllPages();
+        currentPage = 1;
+        await loadStats();
+        await loadAccounts();
+    } catch (error) {
+        toast.error('导入失败: ' + error.message);
+    } finally {
+        if (elements.importBtn) {
+            elements.importBtn.disabled = false;
+            elements.importBtn.textContent = originalText || '📤 导入JSON';
+        }
+    }
+}
+
+function closeImportResultModal() {
+    elements.importResultModal?.classList.remove('active');
+}
+
+function showImportResultModal(result, filename) {
+    if (!elements.importResultModal || !elements.importResultSummary) return;
+
+    const total = result.total || 0;
+    const created = result.created_count || 0;
+    const skipped = result.skipped_count || 0;
+    const skippedExisting = result.skipped_existing_count || 0;
+    const failed = result.failed_count || (result.errors?.length || 0);
+
+    elements.importResultSummary.innerHTML = `
+        <div><strong>文件:</strong> ${escapeHtml(filename || '-')}</div>
+        <div style="margin-top:6px;">
+            <span>总计 ${total}</span> /
+            <span style="color:var(--success-color);">新增 ${created}</span> /
+            <span>跳过 ${skipped}</span> /
+            <span style="color:var(--danger-color);">失败 ${failed}</span>
+        </div>
+        <div style="margin-top:4px;color:var(--text-secondary);font-size:0.85rem;">说明：已存在跳过 ${skippedExisting}</div>
+    `;
+
+    const skippedExistingLines = result.skipped_existing || [];
+    if (elements.importResultExistingSection && elements.importResultExisting) {
+        if (skippedExistingLines.length > 0) {
+            elements.importResultExistingSection.style.display = 'block';
+            elements.importResultExisting.textContent = skippedExistingLines.join('\n');
+        } else {
+            elements.importResultExistingSection.style.display = 'none';
+            elements.importResultExisting.textContent = '';
+        }
+    }
+
+    const errorLines = result.errors || [];
+    if (elements.importResultErrorsSection && elements.importResultErrors) {
+        if (errorLines.length > 0) {
+            elements.importResultErrorsSection.style.display = 'block';
+            elements.importResultErrors.textContent = errorLines.join('\n');
+        } else {
+            elements.importResultErrorsSection.style.display = 'none';
+            elements.importResultErrors.textContent = '';
+        }
+    }
+
+    const warningLines = result.warnings || [];
+    if (elements.importResultWarningsSection && elements.importResultWarnings) {
+        if (warningLines.length > 0) {
+            elements.importResultWarningsSection.style.display = 'block';
+            elements.importResultWarnings.textContent = warningLines.join('\n');
+        } else {
+            elements.importResultWarningsSection.style.display = 'none';
+            elements.importResultWarnings.textContent = '';
+        }
+    }
+
+    elements.importResultModal.classList.add('active');
 }
 
 // 加载统计信息

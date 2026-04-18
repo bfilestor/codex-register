@@ -141,6 +141,14 @@
                         <button class="btn btn-danger" id="batch-delete-btn" disabled>
                             🗑️ 批量删除
                         </button>
+                        <button type="button" class="btn btn-secondary" id="import-btn" title="从导出的 JSON 文件导入账号">
+                            📤 导入
+                        </button>
+                        <input
+                            type="file"
+                            id="import-file-input"
+                            accept=".json,application/json"
+                            style="display: none;"/>
                         <div class="dropdown">
                             <button class="btn btn-primary" id="export-btn">
                                 📥 导出
@@ -230,6 +238,37 @@
         </div>
     </div>
 
+    <!-- 导入结果模态框 -->
+    <div class="modal" id="import-result-modal">
+        <div class="modal-content" style="max-width: 760px;">
+            <div class="modal-header">
+                <h3>📤 导入结果</h3>
+                <button class="modal-close" id="close-import-result-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="import-result-summary" style="margin-bottom: 12px;"></div>
+
+                <div id="import-result-existing-section" style="display:none; margin-bottom: 12px;">
+                    <h4 style="margin: 8px 0;">已存在并跳过</h4>
+                    <div id="import-result-existing" style="max-height: 160px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.8rem; background: var(--surface-hover); border: 1px solid var(--border); border-radius: 6px; padding: 10px;"></div>
+                </div>
+
+                <div id="import-result-errors-section" style="display:none; margin-bottom: 12px;">
+                    <h4 style="margin: 8px 0;">失败明细</h4>
+                    <div id="import-result-errors" style="max-height: 220px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.8rem; background: var(--surface-hover); border: 1px solid var(--border); border-radius: 6px; padding: 10px;"></div>
+                </div>
+
+                <div id="import-result-warnings-section" style="display:none;">
+                    <h4 style="margin: 8px 0;">导入提示</h4>
+                    <div id="import-result-warnings" style="max-height: 140px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.8rem; background: var(--surface-hover); border: 1px solid var(--border); border-radius: 6px; padding: 10px;"></div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end;">
+                <button class="btn btn-primary" id="import-result-ok-btn">知道了</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 详情模态框 -->
     <div class="modal" id="detail-modal">
         <div class="modal-content">
@@ -263,7 +302,7 @@
         </div>
     </div>
 
-    <script src="/static/js/utils.js"></script>
-    <script src="/static/js/accounts.js"></script>
+    <script src="/static/js/utils.js?v=20260418-2"></script>
+    <script src="/static/js/accounts.js?v=20260418-2"></script>
 </body>
 </html>

@@ -269,18 +269,27 @@ class TempMailService(BaseEmailService):
         # 优先使用用户级 JWT，回退到 admin API
         cached = self._email_cache.get(email, {})
         jwt = cached.get("jwt")
+        use_jwt_api = bool(jwt)
 
         while time.time() - start_time < timeout:
             try:
-                # admin/mails 返回格式: {"results": [...], "total": N}
-                if jwt:
-                    response = self._make_request(
-                        "GET",
-                        "/api/mails",
-                        params={"limit": 20, "offset": 0},
-                        headers={"Authorization": f"Bearer {jwt}", "Content-Type": "application/json", "Accept": "application/json"},
-                    )
-                else:
+                response = None
+                # 优先使用用户级 JWT 查询 /api/mails，失败则自动回退 /admin/mails
+                if use_jwt_api and jwt:
+                    try:
+                        response = self._make_request(
+                            "GET",
+                            "/api/mails",
+                            params={"limit": 20, "offset": 0},
+                            headers={"Authorization": f"Bearer {jwt}", "Content-Type": "application/json", "Accept": "application/json"},
+                        )
+                    except Exception as api_err:
+                        logger.warning(
+                            f"TempMail /api/mails 查询失败，回退 /admin/mails: {api_err}"
+                        )
+                        use_jwt_api = False
+
+                if response is None:
                     response = self._make_request(
                         "GET",
                         "/admin/mails",
